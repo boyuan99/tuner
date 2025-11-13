@@ -4,3 +4,8 @@
 .vscode/launch.json
 .vscode/ipch
 .claude/
+ref/
+
+*.md
+!README.md
+!**/README.md

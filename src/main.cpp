@@ -1,247 +1,169 @@
 #include <Arduino.h>
 #include "AD9833.h"
-#include <pt.h>
 #include <Wire.h>
 #include "PT2258.h"
 
+// =====================================================================
+// TDT-Controlled Pure Tone Generator
+// Simple trigger-based audio stimulus for trace conditioning
+// =====================================================================
+// SYSTEM ARCHITECTURE:
+// - TDT controls full experiment timeline (CS, trace, US, ITI)
+// - Arduino acts as triggered tone generator only
+// - TTL pulse on Pin 3 → Play tone for fixed duration
+// =====================================================================
+
 // --------------------- Pin Definitions ----------------------
-#define FNC_PIN 2
-#define LED_PIN 8
-#define BUTTON_PIN 9
+#define FNC_PIN 2           // AD9833 SPI chip select
+#define TRIGGER_PIN 3       // TTL trigger input from TDT
+#define LED_PIN 8           // Status LED (indicates tone playing)
 
-// --------------------- Device Objects ------------------------
-PT2258 pt2258(0x8C); // PT2258 Object
-AD9833 waveGenerator(FNC_PIN);
+// --------------------- Tone Parameters ----------------------
+#define TONE_FREQ 9500      // 9500 Hz pure tone (match eLife 2021)
+#define TONE_DURATION 350   // 350 ms tone duration
 
-// -------------------- Global Variables -----------------------
-int frequencyList[] = {3000, 10000, 30000};
-int volumeList[] = {20,12,10}; // Default volume / Starting Volume
-int blinkCount = 0;
-int frequencyIndex = 0;
-bool isRunning = false;
+// Audio volume control (adjust to achieve 78-84 dB SPL)
+#define VOLUME_ATTENUATION 20  // PT2258 value (0=loudest, 79=muted)
 
-// Protothread control blocks
-static struct pt ptBlinkLED, ptGenerateTone;
+// --------------------- Hardware Objects ----------------------
+PT2258 pt2258(0x8C);              // Digital volume controller (I2C)
+AD9833 waveGenerator(FNC_PIN);    // DDS waveform generator (SPI)
 
-// Protothread for blinking LED
-static int blinkLED(struct pt *pt) {
-    static unsigned long lastTime = 0;
-    PT_BEGIN(pt);
-    while (1) {
-        lastTime = millis();
-        PT_WAIT_UNTIL(pt, millis() - lastTime > 40);
-        digitalWrite(LED_PIN, HIGH);
-        lastTime = millis();
-        PT_WAIT_UNTIL(pt, millis() - lastTime > 10);
-        digitalWrite(LED_PIN, LOW);
-        blinkCount++;
-        if (blinkCount > 79) {
-            lastTime = millis();
-            PT_WAIT_UNTIL(pt, millis() - lastTime > 5000);
-            blinkCount = 0;
-        }
+// --------------------- State Variables ----------------------
+volatile bool triggerReceived = false;  // ISR flag
+bool toneActive = false;                // Tone playing state
+unsigned long toneStartTime = 0;        // Tone start timestamp
+unsigned long toneCount = 0;            // Diagnostic counter
+
+// =====================================================================
+// INTERRUPT SERVICE ROUTINE
+// =====================================================================
+// Triggered by rising edge TTL pulse from TDT system
+void triggerISR() {
+    if (!toneActive) {  // Prevent re-triggering during playback
+        triggerReceived = true;
     }
-    PT_END(pt);
 }
 
-// -----------------------------------------------------------------------------
-// Protothread: Tone Generator
-// -----------------------------------------------------------------------------
-static int generateTone(struct pt *pt) {
-    static unsigned long lastTime = 0;
-    PT_BEGIN(pt);
-
-    while (1) {
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+50,79));
-        // pt2258.attenuation(1, 80);
-        waveGenerator.ApplySignal(SINE_WAVE, REG0, frequencyList[frequencyIndex % 3]);
-        PT_WAIT_UNTIL(pt, blinkCount > 29);
-        waveGenerator.EnableOutput(true);
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+40,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+30,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+20,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+16,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+15,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+14,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+13,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+12,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+11,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+10,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+9,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+8,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+7,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+6,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+5,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+4,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+3,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+2,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+1,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, volumeList[frequencyIndex % 3]);
-
-
-        PT_WAIT_UNTIL(pt, blinkCount > 49);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+1,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+2,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+3,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+4,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+5,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+6,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+7,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+8,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+9,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+10,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+11,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+12,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+13,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+14,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+15,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+16,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+20,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+30,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+40,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, min(volumeList[frequencyIndex % 3]+50,79));
-        lastTime = micros();
-        PT_WAIT_UNTIL(pt, micros() - lastTime > 500);
-        pt2258.attenuation(1, 79);
-        waveGenerator.EnableOutput(false);
-
-        PT_WAIT_UNTIL(pt, blinkCount > 79);
-        lastTime = millis();
-        PT_WAIT_UNTIL(pt, millis() - lastTime > 5000);
-        if (blinkCount == 80) {
-            blinkCount = 0;
-        }
-        frequencyIndex++;
-    }
-    PT_END(pt);
-}
-
+// =====================================================================
+// SETUP - Initialize Hardware
+// =====================================================================
 void setup() {
-    waveGenerator.Begin();
-    Serial.begin(9600);
+    Serial.begin(115200);
+
+    // Print system header
+    Serial.println("\n\n");
+    Serial.println("==============================================");
+    Serial.println("===   TDT-CONTROLLED TONE GENERATOR       ===");
+    Serial.println("===   Pure Tone: 9500 Hz, 350 ms          ===");
+    Serial.println("==============================================");
+    Serial.println("Mode: External trigger (Pin 3)");
+    Serial.println("Reference: Mount et al., eLife 2021\n");
+
+    // Initialize GPIO pins
     pinMode(LED_PIN, OUTPUT);
     pinMode(FNC_PIN, OUTPUT);
-    pinMode(BUTTON_PIN, INPUT_PULLUP);
-    waveGenerator.EnableOutput(false);
+    pinMode(TRIGGER_PIN, INPUT); 
     digitalWrite(LED_PIN, LOW);
-    PT_INIT(&ptBlinkLED);
-    PT_INIT(&ptGenerateTone);
-    Wire.setClock(400000); // setting the I2C clock to 100KHz
-    /* checking if the MCU can talk with the PT or not*/
-    if (!pt2258.begin())
-      Serial.println("PT2258 Successfully Initiated");
-    else
-      Serial.println("Failed to Initiate PT2258");
-    /* Initiating PT with default volume and Pin*/
-    pt2258.mute(false);
-    pt2258.attenuation(1, 79);
-}
 
-void loop() {
-    int currentButtonState = digitalRead(BUTTON_PIN);
-    static int previousButtonState = HIGH;
-    Serial.println(blinkCount);
-    if (frequencyIndex == 30) {
-        waveGenerator.EnableOutput(false);
-        digitalWrite(LED_PIN, LOW);
-        previousButtonState = HIGH;
-        isRunning = !isRunning;
-        blinkCount = 0;
-        frequencyIndex = 0;
-        return;
+    // Setup external trigger interrupt (rising edge)
+    attachInterrupt(digitalPinToInterrupt(TRIGGER_PIN), triggerISR, RISING);
+    Serial.println("[INIT] Trigger interrupt configured on Pin 3");
+
+    // Initialize AD9833 DDS waveform generator
+    waveGenerator.Begin();
+    waveGenerator.EnableOutput(false);
+    Serial.println("[INIT] AD9833 waveform generator initialized");
+
+    // Initialize PT2258 digital volume controller
+    Wire.setClock(400000);  // I2C at 400 kHz
+
+    if (!pt2258.begin()) {
+        Serial.println("[INIT] PT2258 volume controller initialized");
+    } else {
+        Serial.println("[ERROR] PT2258 initialization FAILED!");
+        Serial.println("       Check I2C wiring (SDA=A4, SCL=A5)");
     }
 
-    if (currentButtonState == LOW && previousButtonState == HIGH) {
-        delay(50); // Debounce delay
-        if (digitalRead(BUTTON_PIN) == LOW) {
-            delay(3000);
-            isRunning = !isRunning;
+    pt2258.attenuation(1, 79);  // Set max attenuation first
+    pt2258.mute(true);          // Then mute all channels (true = muted)
+
+    // Display configuration
+    Serial.println("\n--- TONE PARAMETERS ---");
+    Serial.print("Frequency:        ");
+    Serial.print(TONE_FREQ);
+    Serial.println(" Hz");
+
+    Serial.print("Duration:         ");
+    Serial.print(TONE_DURATION);
+    Serial.println(" ms");
+
+    Serial.print("Volume (atten):   ");
+    Serial.print(VOLUME_ATTENUATION);
+    Serial.println(" dB");
+
+    Serial.println("\n--- HARDWARE CONNECTIONS ---");
+    Serial.println("Pin 3:  TTL trigger input (from TDT)");
+    Serial.println("Pin 8:  Status LED (ON during tone)");
+    Serial.println("Audio:  Connect to amplifier/speaker");
+
+    Serial.println("\n==============================================");
+    Serial.println("[READY] Waiting for TDT triggers...");
+    Serial.println("==============================================\n");
+}
+
+// =====================================================================
+// MAIN LOOP - Handle Trigger and Tone Timing
+// =====================================================================
+void loop() {
+    // ========== CHECK FOR NEW TRIGGER ==========
+    if (triggerReceived) {
+        triggerReceived = false;
+        toneCount++;
+
+        // Start tone playback
+        Serial.print("[");
+        Serial.print(millis());
+        Serial.print(" ms] Tone #");
+        Serial.print(toneCount);
+        Serial.print(" START (");
+        Serial.print(TONE_FREQ);
+        Serial.println(" Hz)");
+
+        digitalWrite(LED_PIN, HIGH);  // Visual indicator
+
+        // Configure and enable audio output
+        pt2258.attenuation(1, VOLUME_ATTENUATION);  // Set volume
+        pt2258.mute(false);                         // Unmute audio
+        waveGenerator.ApplySignal(SINE_WAVE, REG0, TONE_FREQ);
+        waveGenerator.EnableOutput(true);
+
+        toneStartTime = millis();
+        toneActive = true;
+    }
+
+    // ========== CHECK TONE DURATION ==========
+    if (toneActive) {
+        unsigned long elapsed = millis() - toneStartTime;
+
+        if (elapsed >= TONE_DURATION) {
+            // Stop tone playback
+            waveGenerator.EnableOutput(false);
+            pt2258.mute(true);          // Mute audio
+            pt2258.attenuation(1, 79);  // Set max attenuation
+            digitalWrite(LED_PIN, LOW);
+
+            Serial.print("[");
+            Serial.print(millis());
+            Serial.print(" ms] Tone #");
+            Serial.print(toneCount);
+            Serial.print(" END (duration: ");
+            Serial.print(elapsed);
+            Serial.println(" ms)\n");
+
+            toneActive = false;
         }
     }
 
-    if (isRunning) {
-        // waveGenerator.EnableOutput(true);
-        blinkLED(&ptBlinkLED);
-        generateTone(&ptGenerateTone);
-    }
-
-    previousButtonState = currentButtonState;
+    // No delay - keep loop responsive for precise timing
 }
