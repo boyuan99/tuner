@@ -58,7 +58,6 @@ void setup() {
     Serial.println("===   Pure Tone: 9500 Hz, 350 ms          ===");
     Serial.println("==============================================");
     Serial.println("Mode: External trigger (Pin 3)");
-    Serial.println("Reference: Mount et al., eLife 2021\n");
 
     // Initialize GPIO pins
     pinMode(LED_PIN, OUTPUT);
@@ -78,7 +77,7 @@ void setup() {
     // Initialize PT2258 digital volume controller
     Wire.setClock(400000);  // I2C at 400 kHz
 
-    if (!pt2258.begin()) {
+    if (pt2258.begin()) {
         Serial.println("[INIT] PT2258 volume controller initialized");
     } else {
         Serial.println("[ERROR] PT2258 initialization FAILED!");
