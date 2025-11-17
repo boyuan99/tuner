@@ -15,11 +15,11 @@
 
 // --------------------- Pin Definitions ----------------------
 #define FNC_PIN 2           // AD9833 SPI chip select
-#define TRIGGER_PIN 3       // TTL trigger input from TDT
+#define TRIGGER_PIN 9       // TTL trigger input from TDT
 #define LED_PIN 8           // Status LED (indicates tone playing)
 
 // --------------------- Tone Parameters ----------------------
-#define TONE_FREQ 9500      // 9500 Hz pure tone (match eLife 2021)
+#define TONE_FREQ 9500      // 9500 Hz pure tone
 #define TONE_DURATION 350   // 350 ms tone duration
 
 // Audio volume control (adjust to achieve 78-84 dB SPL)
@@ -30,26 +30,17 @@ PT2258 pt2258(0x8C);              // Digital volume controller (I2C)
 AD9833 waveGenerator(FNC_PIN);    // DDS waveform generator (SPI)
 
 // --------------------- State Variables ----------------------
-volatile bool triggerReceived = false;  // ISR flag
+int previousTriggerState = LOW;         // Previous state of trigger pin for edge detection
 bool toneActive = false;                // Tone playing state
 unsigned long toneStartTime = 0;        // Tone start timestamp
 unsigned long toneCount = 0;            // Diagnostic counter
-
-// =====================================================================
-// INTERRUPT SERVICE ROUTINE
-// =====================================================================
-// Triggered by rising edge TTL pulse from TDT system
-void triggerISR() {
-    if (!toneActive) {  // Prevent re-triggering during playback
-        triggerReceived = true;
-    }
-}
 
 // =====================================================================
 // SETUP - Initialize Hardware
 // =====================================================================
 void setup() {
     Serial.begin(115200);
+    delay(2000);  // Wait for board to stabilize
 
     // Print system header
     Serial.println("\n\n");
@@ -62,12 +53,10 @@ void setup() {
     // Initialize GPIO pins
     pinMode(LED_PIN, OUTPUT);
     pinMode(FNC_PIN, OUTPUT);
-    pinMode(TRIGGER_PIN, INPUT); 
+    pinMode(TRIGGER_PIN, INPUT);  // Regular INPUT - TDT drives the signal
     digitalWrite(LED_PIN, LOW);
 
-    // Setup external trigger interrupt (rising edge)
-    attachInterrupt(digitalPinToInterrupt(TRIGGER_PIN), triggerISR, RISING);
-    Serial.println("[INIT] Trigger interrupt configured on Pin 3");
+    Serial.println("[INIT] Trigger detection configured on Pin 9 (polling mode)");
 
     // Initialize AD9833 DDS waveform generator
     waveGenerator.Begin();
@@ -102,7 +91,7 @@ void setup() {
     Serial.println(" dB");
 
     Serial.println("\n--- HARDWARE CONNECTIONS ---");
-    Serial.println("Pin 3:  TTL trigger input (from TDT)");
+    Serial.println("Pin 9:  TTL trigger input (from TDT)");
     Serial.println("Pin 8:  Status LED (ON during tone)");
     Serial.println("Audio:  Connect to amplifier/speaker");
 
@@ -115,31 +104,41 @@ void setup() {
 // MAIN LOOP - Handle Trigger and Tone Timing
 // =====================================================================
 void loop() {
-    // ========== CHECK FOR NEW TRIGGER ==========
-    if (triggerReceived) {
-        triggerReceived = false;
-        toneCount++;
+    // ========== CHECK FOR NEW TRIGGER (POLLING) ==========
+    int currentTriggerState = digitalRead(TRIGGER_PIN);
 
-        // Start tone playback
-        Serial.print("[");
-        Serial.print(millis());
-        Serial.print(" ms] Tone #");
-        Serial.print(toneCount);
-        Serial.print(" START (");
-        Serial.print(TONE_FREQ);
-        Serial.println(" Hz)");
+    // Detect rising edge (LOW to HIGH transition)
+    if (currentTriggerState == HIGH && previousTriggerState == LOW && !toneActive) {
+        delay(5);  // Small debounce delay
 
-        digitalWrite(LED_PIN, HIGH);  // Visual indicator
+        // Confirm the pin is still HIGH
+        if (digitalRead(TRIGGER_PIN) == HIGH) {
+            toneCount++;
 
-        // Configure and enable audio output
-        pt2258.attenuation(1, VOLUME_ATTENUATION);  // Set volume
-        pt2258.mute(false);                         // Unmute audio
-        waveGenerator.ApplySignal(SINE_WAVE, REG0, TONE_FREQ);
-        waveGenerator.EnableOutput(true);
+            // Start tone playback
+            Serial.print("[");
+            Serial.print(millis());
+            Serial.print(" ms] Tone #");
+            Serial.print(toneCount);
+            Serial.print(" START (");
+            Serial.print(TONE_FREQ);
+            Serial.println(" Hz)");
 
-        toneStartTime = millis();
-        toneActive = true;
+            digitalWrite(LED_PIN, HIGH);  // Visual indicator
+
+            // Configure and enable audio output
+            pt2258.attenuation(1, VOLUME_ATTENUATION);  // Set volume
+            pt2258.mute(false);                         // Unmute audio
+            waveGenerator.ApplySignal(SINE_WAVE, REG0, TONE_FREQ);
+            waveGenerator.EnableOutput(true);
+
+            toneStartTime = millis();
+            toneActive = true;
+        }
     }
+
+    // Update previous state for next iteration
+    previousTriggerState = currentTriggerState;
 
     // ========== CHECK TONE DURATION ==========
     if (toneActive) {
