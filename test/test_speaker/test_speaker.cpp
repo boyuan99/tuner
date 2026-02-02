@@ -15,11 +15,11 @@
 
 // --------------------- Test Tone Parameters ----------------------
 #define TEST_TONE_FREQ 9500      // 9500 Hz pure tone
-#define TEST_TONE_DURATION 500   // 500 ms tone duration
-#define TEST_INTERVAL 5000       // 5000 ms (5 seconds) between tones
+#define TEST_TONE_DURATION 1000   // 1000 ms tone duration
+#define TEST_INTERVAL 2000       // 2000 ms (2 seconds) between tones
 
 // Audio volume control
-#define TEST_VOLUME_ATTENUATION 10  // PT2258 value (0=loudest, 79=muted)
+#define TEST_VOLUME_ATTENUATION 20  // PT2258 value (0=loudest, 79=muted)
 
 // --------------------- Hardware Objects ----------------------
 PT2258 pt2258(0x8C);              // Digital volume controller (I2C)
